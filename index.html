@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GitHub Dev Card Generator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#0d1117;--panel:#0b1220;--muted:#8b949e;--accent:#58a6ff}
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:#c9d1d9;font-family:Inter,system-ui,Segoe UI,Helvetica,Arial,sans-serif;display:flex;align-items:center;justify-content:center;padding:32px}
+    .container{width:100%;max-width:680px}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);border-radius:12px;padding:32px;box-shadow:0 10px 30px rgba(2,6,23,0.6)}
+    h1{margin:0;font-size:28px;color:#fff}
+    p.lead{margin:6px 0 20px;color:var(--muted)}
+    .controls{display:flex;gap:12px;margin-bottom:18px}
+    input[type="text"]{flex:1;padding:12px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:inherit;font-size:15px}
+    button.primary{background:linear-gradient(90deg,var(--accent),#1f8fff);border:none;color:#042332;padding:12px 18px;border-radius:10px;font-weight:600;cursor:pointer;transition:transform .15s ease,box-shadow .15s ease}
+    button.primary:hover{transform:translateY(-3px);box-shadow:0 8px 20px rgba(88,166,255,0.12)}
+    .meta{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+    .skeleton{height:220px;border-radius:8px;background:linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.04), rgba(255,255,255,0.02));animation:pulse 1.2s infinite}
+    @keyframes pulse{0%{opacity:0.6}50%{opacity:1}100%{opacity:0.6}}
+    .result{margin-top:14px}
+    .result .inner{opacity:0;transition:opacity .4s ease,transform .4s ease;transform:translateY(6px)}
+    .result.show .inner{opacity:1;transform:none}
+    .row{display:flex;gap:8px;align-items:center}
+    .share{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);padding:8px 10px;border-radius:8px;cursor:pointer}
+    .error{background:#2a1b1b;color:#ffdada;padding:12px;border-radius:8px;margin-top:10px}
+    footer{color:var(--muted);font-size:13px;margin-top:16px;text-align:center}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h1>GitHub Dev Card Generator</h1>
+      <p class="lead">Enter any public GitHub username</p>
+
+      <div class="controls">
+        <input id="username" type="text" placeholder="e.g. torvalds" />
+        <button id="generate" class="primary">Generate Card</button>
+      </div>
+
+      <div id="status" class="meta"></div>
+
+      <div id="placeholder" class="skeleton" style="display:none"></div>
+
+      <div id="result" class="result" aria-live="polite">
+        <div class="inner" id="cardContainer"></div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+        <button id="share" class="share" style="display:none">Copy share URL</button>
+        <div id="error" style="display:none" class="error"></div>
+      </div>
+
+      <footer>Powered by your local MCP backend</footer>
+    </div>
+  </div>
+
+  <script>
+    // Determine backend URL: substituted at container start or fallback to localhost
+    let BACKEND_URL = '${BACKEND_URL}';
+    if (!BACKEND_URL || BACKEND_URL.indexOf('${') === 0) BACKEND_URL = 'http://localhost:8080';
+
+    const generate = document.getElementById('generate');
+    const usernameInput = document.getElementById('username');
+    const status = document.getElementById('status');
+    const placeholder = document.getElementById('placeholder');
+    const cardContainer = document.getElementById('cardContainer');
+    const result = document.getElementById('result');
+    const share = document.getElementById('share');
+    const errorBox = document.getElementById('error');
+    const isFileProtocol = window.location.protocol === 'file:';
+
+    function setLoading(on){
+      if(on){
+        placeholder.style.display = 'block';
+        status.textContent = 'Generating — this may take a few seconds';
+        result.classList.remove('show');
+        cardContainer.innerHTML = '';
+        share.style.display = 'none';
+        errorBox.style.display = 'none';
+        usernameInput.disabled = true;
+        generate.disabled = true;
+      } else {
+        placeholder.style.display = 'none';
+        usernameInput.disabled = false;
+        generate.disabled = false;
+      }
+    }
+
+    function showError(msg){
+      errorBox.style.display = 'block';
+      errorBox.textContent = msg;
+      status.textContent = '';
+      setLoading(false);
+    }
+
+    function checkLocalFileOrigin(){
+      if(isFileProtocol){
+        showError('This app was opened directly from the file system. Use a local HTTP server or Docker Compose to run it, for example http://localhost:3000.');
+        status.textContent = 'Cannot use file:// origin';
+        usernameInput.disabled = true;
+        generate.disabled = true;
+        return true;
+      }
+      return false;
+    }
+
+    async function fetchCardHtml(username){
+      const url = `${BACKEND_URL}/card/${encodeURIComponent(username)}`;
+      const r = await fetch(url);
+      if(!r.ok){
+        throw new Error('Card not found');
+      }
+      return await r.text();
+    }
+
+    async function streamGenerate(username){
+      const url = `${BACKEND_URL}/generate`;
+      const controller = new AbortController();
+      setLoading(true);
+      status.textContent = 'Starting...';
+
+      try{
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({username}),
+          signal: controller.signal,
+        });
+
+        if(!res.ok){
+          const txt = await res.text();
+          throw new Error(txt || 'Request failed');
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+
+        while(true){
+          const {done, value} = await reader.read();
+          if(done) break;
+          buf += decoder.decode(value, {stream:true});
+          const lines = buf.split('\n');
+          buf = lines.pop();
+          for(const line of lines){
+            if(!line.trim()) continue;
+            try{
+              const ev = JSON.parse(line);
+              handleEvent(ev, username);
+            }catch(e){
+              console.warn('non-json', line);
+            }
+          }
+        }
+        // process final buffered line
+        if(buf.trim()){
+          try{ handleEvent(JSON.parse(buf), username); }catch(e){}
+        }
+
+      }catch(err){
+        console.error(err);
+        const message = err.message === 'Failed to fetch'
+          ? `Failed to contact backend at ${BACKEND_URL}. Make sure the backend is running and accessible.`
+          : err.message;
+        showError('Failed to generate card — '+message);
+      }
+    }
+
+    async function handleEvent(ev, username){
+      if(ev.event === 'started'){
+        status.textContent = 'Started';
+      } else if(ev.event === 'step'){
+        status.textContent = ev.message || '';
+      } else if(ev.event === 'error'){
+        showError(ev.message || 'An error occurred');
+      } else if(ev.event === 'finished'){
+        status.textContent = 'Finished';
+        try{
+          const html = await fetchCardHtml(username);
+          // Parse returned full HTML and extract the inner `.card` fragment to avoid
+          // injecting a second <html>/<body> which can cause background flashes.
+          try{
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const frag = doc.querySelector('.card');
+            if(frag){
+              cardContainer.innerHTML = '';
+              cardContainer.appendChild(frag.cloneNode(true));
+            } else {
+              cardContainer.innerHTML = html;
+            }
+          }catch(e){
+            cardContainer.innerHTML = html;
+          }
+          result.classList.add('show');
+          setLoading(false);
+          // Focus and select the username input so the user can quickly search again
+          try{ usernameInput.focus(); usernameInput.select(); }catch(e){}
+          // show share button
+          share.style.display = 'inline-block';
+          share.onclick = async ()=>{
+            const shareUrl = `${BACKEND_URL}/card/${encodeURIComponent(username)}`;
+            try{ await navigator.clipboard.writeText(shareUrl); share.textContent='Copied!'; setTimeout(()=>share.textContent='Copy share URL',2000)}catch(e){alert('Copy failed')}
+          };
+        }catch(e){
+          showError('Could not load generated card.');
+        }
+      }
+    }
+
+    generate.addEventListener('click', ()=>{
+      const u = usernameInput.value.trim();
+      if(!u){ usernameInput.focus(); return }
+      streamGenerate(u);
+    });
+
+    if(!checkLocalFileOrigin()){
+      usernameInput.focus();
+    }
+
+    generate.addEventListener('click', ()=>{
+      const u = usernameInput.value.trim();
+      if(!u){ usernameInput.focus(); return }
+      streamGenerate(u);
+    });
+
+    usernameInput.addEventListener('keydown', (e)=>{ if(e.key === 'Enter'){ e.preventDefault(); generate.click(); } });
+  </script>
+</body>
+</html>
