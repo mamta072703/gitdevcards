@@ -1,10 +1,32 @@
-FROM nginx:alpine
-# Install envsubst (gettext) for runtime template substitution
-RUN apk add --no-cache gettext
-WORKDIR /usr/share/nginx/html
-COPY index.html /usr/share/nginx/html/index.html.template
-COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
-EXPOSE 80
-ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["nginx", "-g", "daemon off;"]
+# Use Python 3.11 slim image as base
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Expose port 8080 (required by Cloud Run)
+EXPOSE 8080
+
+# Set environment variable for port
+ENV PORT=8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health').read()"
+
+# Run the application
+CMD ["python", "main.py"]
