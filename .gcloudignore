@@ -1,0 +1,29 @@
+# This file specifies files that should NOT be included in source uploads to Google Cloud.
+# If you add files to this file, they will be ignored when running:
+# $ gcloud builds submit
+# or
+# $ gcloud app deploy
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git
+.gitignore
+.dockerignore
+.gcloudignore
