@@ -1,0 +1,35 @@
+steps:
+  # Step 1: Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: 
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/gitdevcards:$SHORT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/gitdevcards:latest'
+      - '.'
+
+  # Step 2: Push the image to Google Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: 
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/gitdevcards:$SHORT_SHA'
+
+  # Step 3: Deploy to Cloud Run
+  - name: 'gcr.io/cloud-builders/gke-deploy'
+    args:
+      - run
+      - '--filename=service.yaml'
+      - '--image=gcr.io/$PROJECT_ID/gitdevcards:$SHORT_SHA'
+      - '--location=us-central1'
+    env:
+      - 'CLOUDSDK_COMPUTE_REGION=us-central1'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=gitdevcards'
+
+images:
+  - 'gcr.io/$PROJECT_ID/gitdevcards:$SHORT_SHA'
+  - 'gcr.io/$PROJECT_ID/gitdevcards:latest'
+
+timeout: '3600s'
+options:
+  machineType: 'N1_HIGHCPU_8'
